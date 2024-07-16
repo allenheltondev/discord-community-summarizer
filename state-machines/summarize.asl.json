@@ -1,0 +1,283 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "Run Enrichments",
+  "States": {
+    "Run Enrichments": {
+      "Type": "Parallel",
+      "Next": "Iterate Channels",
+      "Branches": [
+        {
+          "StartAt": "Get Channel Details",
+          "States": {
+            "Get Channel Details": {
+              "Type": "Task",
+              "Resource": "${LambdaInvoke}",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "${MapChannelNames}"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Get Last Run",
+          "States": {
+            "Get Last Run": {
+              "Type": "Task",
+              "Resource": "${DynamoDbGetItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Key": {
+                  "pk": {
+                    "S": "lastRun"
+                  },
+                  "sk": {
+                    "S": "date"
+                  }
+                }
+              },
+              "Next": "Has Last Run?"
+            },
+            "Has Last Run?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Item",
+                  "IsPresent": true,
+                  "Next": "Use Last Run Date"
+                }
+              ],
+              "Default": "Use Execution Date"
+            },
+            "Use Last Run Date": {
+              "Type": "Pass",
+              "End": true,
+              "Parameters": {
+                "filterDate.$": "$.Item.date.S"
+              }
+            },
+            "Use Execution Date": {
+              "Type": "Pass",
+              "End": true,
+              "Parameters": {
+                "filterDate.$": "$$.Execution.StartTime"
+              }
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.enrichments"
+    },
+    "Iterate Channels": {
+      "Type": "Map",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "Get Channel Messages",
+        "States": {
+          "Get Channel Messages": {
+            "Type": "Task",
+            "Resource": "${LambdaInvoke}",
+            "Parameters": {
+              "FunctionName": "${GetChannelMessages}",
+              "Payload": {
+                "channel.$": "$.channel",
+                "filterDate.$": "$.filterDate",
+                "format": "transcript"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Next": "Process Messages",
+            "ResultPath": "$.messages",
+            "ResultSelector": {
+              "transcript.$": "$.Payload.transcript",
+              "metadata.$": "$.Payload.metadata"
+            }
+          },
+          "Process Messages": {
+            "Type": "Parallel",
+            "Branches": [
+              {
+                "StartAt": "Has Messages?",
+                "States": {
+                  "Has Messages?": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.messages.metadata.messageCount",
+                        "NumericGreaterThan": 0,
+                        "Next": "Summarize Transcript"
+                      }
+                    ],
+                    "Default": "Skip Summary"
+                  },
+                  "Skip Summary": {
+                    "Type": "Pass",
+                    "End": true,
+                    "Parameters": {
+                      "summary": "No messages were sent in this channel",
+                      "questions": [],
+                      "channel.$": "$.channel.name",
+                      "hasSummary": false
+                    }
+                  },
+                  "Summarize Transcript": {
+                    "Type": "Task",
+                    "Resource": "${LambdaInvoke}",
+                    "OutputPath": "$.Payload",
+                    "Parameters": {
+                      "FunctionName": "${SummarizeTranscript}",
+                      "Payload": {
+                        "channel.$": "$.channel.name",
+                        "transcript.$": "$.messages.transcript"
+                      }
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "End": true
+                  }
+                }
+              },
+              {
+                "StartAt": "Save Channel Metadata",
+                "States": {
+                  "Save Channel Metadata": {
+                    "Type": "Task",
+                    "Resource": "${DynamoDbPutItem}",
+                    "Parameters": {
+                      "TableName": "${TableName}",
+                      "Item": {
+                        "pk": {
+                          "S.$": "$.channel.name"
+                        },
+                        "sk": {
+                          "S.$": "$$.Execution.StartTime"
+                        },
+                        "messageCount": {
+                          "N.$": "States.Format('{}', $.messages.metadata.messageCount)"
+                        },
+                        "distinctUsers": {
+                          "N.$": "States.Format('{}', $.messages.metadata.distinctUsers)"
+                        }
+                      }
+                    },
+                    "ResultPath": null,
+                    "End": true
+                  }
+                }
+              }
+            ],
+            "End": true,
+            "ResultSelector": {
+              "channel.$": "$[0]"
+            },
+            "OutputPath": "$.channel"
+          }
+        }
+      },
+      "Next": "Format Email",
+      "ItemsPath": "$.enrichments[0].channels",
+      "ItemSelector": {
+        "channel.$": "$$.Map.Item.Value",
+        "filterDate.$": "$.enrichments[1].filterDate"
+      }
+    },
+    "Format Email": {
+      "Type": "Task",
+      "Resource": "${LambdaInvoke}",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${FormatSummaryEmail}",
+        "Payload": {
+          "channels.$": "$"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "Send Email"
+    },
+    "Send Email": {
+      "Type": "Task",
+      "Resource": "${EventBridgePutEvents}",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "subject": "Believe in Serverless Weekly Update",
+              "to": "allenheltondev@gmail.com",
+              "html.$": "$.html"
+            },
+            "DetailType": "Send Email",
+            "Source": "bis.weekly-update"
+          }
+        ]
+      },
+      "Next": "Update Last Run Record",
+      "ResultPath": null
+    },
+    "Update Last Run Record": {
+      "Type": "Task",
+      "Resource": "${DynamoDbPutItem}",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Item": {
+          "pk": {
+            "S": "lastRun"
+          },
+          "sk": {
+            "S": "date"
+          },
+          "date": {
+            "S.$": "$$.Execution.StartTime"
+          }
+        }
+      },
+      "End": true,
+      "ResultPath": null
+    }
+  }
+}

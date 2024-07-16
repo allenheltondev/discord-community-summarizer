@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Summarizes Discord activity on a weekly basis
+
+Parameters:
+  DiscordSecret:
+    Type: String
+  GuildId:
+    Type: String
+
+Metadata:
+  esbuild-properties: &esbuild-properties
+    Format: esm
+    Minify: true
+    OutExtension:
+      - .js=.mjs
+    Target: es2020
+    Sourcemap: false
+    EntryPoints:
+      - index.mjs
+    Banner:
+      - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+    External:
+      - '@aws-sdk/*'
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures:
+      - arm64
+    Tracing: Active
+    Timeout: 15
+    MemorySize: 1024
+    CodeUri: functions
+    Environment:
+      Variables:
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+
+Resources:
+  GetChannelMessagesFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - get-channel-messages.mjs
+    Properties:
+      Handler: get-channel-messages.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DiscordSecret
+      Environment:
+        Variables:
+          SECRET_ID: !Ref DiscordSecret
+
+  MapChannelNamesFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - map-channel-names.mjs
+    Properties:
+      Handler: map-channel-names.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DiscordSecret
+      Environment:
+        Variables:
+          SECRET_ID: !Ref DiscordSecret
+          GUILD_ID: !Ref GuildId
+
+  SummarizeTranscriptFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - summarize-transcript.mjs
+    Properties:
+      Handler: summarize-transcript.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: '*'
+
+  FormatSummaryEmailFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - format-summary-email.mjs
+    Properties:
+      Handler: format-summary-email.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DiscordSecret
+      Environment:
+        Variables:
+          SECRET_ID: !Ref DiscordSecret
+
+  DiscordTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+
+  SummarizeStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: state-machines/summarize.asl.json
+      DefinitionSubstitutions:
+        LambdaInvoke: !Sub arn:${AWS::Partition}:states:::lambda:invoke
+        MapChannelNames: !GetAtt MapChannelNamesFunction.Arn
+        GetChannelMessages: !GetAtt GetChannelMessagesFunction.Arn
+        SummarizeTranscript: !GetAtt SummarizeTranscriptFunction.Arn
+        FormatSummaryEmail: !GetAtt FormatSummaryEmailFunction.Arn
+        DynamoDbGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
+        DynamoDbPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
+        TableName: !Ref DiscordTable
+        EventBridgePutEvents: !Sub arn:${AWS::Partition}:states:::events:putEvents
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !GetAtt MapChannelNamesFunction.Arn
+                - !GetAtt GetChannelMessagesFunction.Arn
+                - !GetAtt SummarizeTranscriptFunction.Arn
+                - !GetAtt FormatSummaryEmailFunction.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt DiscordTable.Arn
+            - Effect: Allow
+              Action: events:PutEvents
+              Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default
+      Events:
+        Trigger:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(0 2 ? * 1 *)"
+            Input: >
+              {
+                "channelNames": ["security", "event-driven", "compute", "data", "programming-languages", "observability", "api", "iac-tooling", "cicd", "finops"]
+              }

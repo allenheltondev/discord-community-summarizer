@@ -4,7 +4,7 @@
   "States": {
     "Run Enrichments": {
       "Type": "Parallel",
-      "Next": "Iterate Channels",
+      "Next": "Summarize",
       "Branches": [
         {
           "StartAt": "Get Channel Details",
@@ -47,7 +47,7 @@
                     "S": "lastRun"
                   },
                   "sk": {
-                    "S": "date"
+                    "S": "details"
                   }
                 }
               },
@@ -59,23 +59,25 @@
                 {
                   "Variable": "$.Item",
                   "IsPresent": true,
-                  "Next": "Use Last Run Date"
+                  "Next": "Use Last Run"
                 }
               ],
               "Default": "Use Execution Date"
             },
-            "Use Last Run Date": {
+            "Use Last Run": {
               "Type": "Pass",
               "End": true,
               "Parameters": {
-                "filterDate.$": "$.Item.date.S"
+                "filterDate.$": "$.Item.date.S",
+                "lastMemberCount.$": "$.Item.memberCount.N"
               }
             },
             "Use Execution Date": {
               "Type": "Pass",
               "End": true,
               "Parameters": {
-                "filterDate.$": "$$.Execution.StartTime"
+                "filterDate.$": "$$.Execution.StartTime",
+                "lastMemberCount": 0
               }
             }
           }
@@ -83,78 +85,36 @@
       ],
       "ResultPath": "$.enrichments"
     },
-    "Iterate Channels": {
-      "Type": "Map",
-      "ItemProcessor": {
-        "ProcessorConfig": {
-          "Mode": "INLINE"
-        },
-        "StartAt": "Get Channel Messages",
-        "States": {
-          "Get Channel Messages": {
-            "Type": "Task",
-            "Resource": "${LambdaInvoke}",
-            "Parameters": {
-              "FunctionName": "${GetChannelMessages}",
-              "Payload": {
-                "channel.$": "$.channel",
-                "filterDate.$": "$.filterDate",
-                "format": "transcript"
-              }
-            },
-            "Retry": [
-              {
-                "ErrorEquals": [
-                  "States.ALL"
-                ],
-                "IntervalSeconds": 5,
-                "MaxAttempts": 3,
-                "BackoffRate": 2
-              }
-            ],
-            "Next": "Process Messages",
-            "ResultPath": "$.messages",
-            "ResultSelector": {
-              "transcript.$": "$.Payload.transcript",
-              "metadata.$": "$.Payload.metadata"
-            }
-          },
-          "Process Messages": {
-            "Type": "Parallel",
-            "Branches": [
-              {
-                "StartAt": "Has Messages?",
+    "Summarize": {
+      "Type": "Parallel",
+      "Next": "Format Email",
+      "Branches": [
+        {
+          "StartAt": "Iterate Channels",
+          "States": {
+            "Iterate Channels": {
+              "Type": "Map",
+              "End": true,
+              "ItemsPath": "$.enrichments[0].channels",
+              "ItemSelector": {
+                "channel.$": "$$.Map.Item.Value",
+                "filterDate.$": "$.enrichments[1].filterDate"
+              },
+              "ItemProcessor": {
+                "ProcessorConfig": {
+                  "Mode": "INLINE"
+                },
+                "StartAt": "Get Channel Messages",
                 "States": {
-                  "Has Messages?": {
-                    "Type": "Choice",
-                    "Choices": [
-                      {
-                        "Variable": "$.messages.metadata.messageCount",
-                        "NumericGreaterThan": 0,
-                        "Next": "Summarize Transcript"
-                      }
-                    ],
-                    "Default": "Skip Summary"
-                  },
-                  "Skip Summary": {
-                    "Type": "Pass",
-                    "End": true,
-                    "Parameters": {
-                      "summary": "No messages were sent in this channel",
-                      "questions": [],
-                      "channel.$": "$.channel.name",
-                      "hasSummary": false
-                    }
-                  },
-                  "Summarize Transcript": {
+                  "Get Channel Messages": {
                     "Type": "Task",
                     "Resource": "${LambdaInvoke}",
-                    "OutputPath": "$.Payload",
                     "Parameters": {
-                      "FunctionName": "${SummarizeTranscript}",
+                      "FunctionName": "${GetChannelMessages}",
                       "Payload": {
-                        "channel.$": "$.channel.name",
-                        "transcript.$": "$.messages.transcript"
+                        "channel.$": "$.channel",
+                        "filterDate.$": "$.filterDate",
+                        "format": "transcript"
                       }
                     },
                     "Retry": [
@@ -167,52 +127,171 @@
                         "BackoffRate": 2
                       }
                     ],
-                    "End": true
-                  }
-                }
-              },
-              {
-                "StartAt": "Save Channel Metadata",
-                "States": {
-                  "Save Channel Metadata": {
-                    "Type": "Task",
-                    "Resource": "${DynamoDbPutItem}",
-                    "Parameters": {
-                      "TableName": "${TableName}",
-                      "Item": {
-                        "pk": {
-                          "S.$": "$.channel.name"
-                        },
-                        "sk": {
-                          "S.$": "$$.Execution.StartTime"
-                        },
-                        "messageCount": {
-                          "N.$": "States.Format('{}', $.messages.metadata.messageCount)"
-                        },
-                        "distinctUsers": {
-                          "N.$": "States.Format('{}', $.messages.metadata.distinctUsers)"
+                    "Next": "Process Messages",
+                    "ResultPath": "$.messages",
+                    "ResultSelector": {
+                      "transcript.$": "$.Payload.transcript",
+                      "metadata.$": "$.Payload.metadata"
+                    }
+                  },
+                  "Process Messages": {
+                    "Type": "Parallel",
+                    "Branches": [
+                      {
+                        "StartAt": "Has Messages?",
+                        "States": {
+                          "Has Messages?": {
+                            "Type": "Choice",
+                            "Choices": [
+                              {
+                                "Variable": "$.messages.metadata.messageCount",
+                                "NumericGreaterThan": 0,
+                                "Next": "Summarize Transcript"
+                              }
+                            ],
+                            "Default": "Skip Summary"
+                          },
+                          "Skip Summary": {
+                            "Type": "Pass",
+                            "End": true,
+                            "Parameters": {
+                              "summary": "No messages were sent in this channel",
+                              "questions": [],
+                              "channel.$": "$.channel.name",
+                              "hasSummary": false
+                            }
+                          },
+                          "Summarize Transcript": {
+                            "Type": "Task",
+                            "Resource": "${LambdaInvoke}",
+                            "OutputPath": "$.Payload",
+                            "Parameters": {
+                              "FunctionName": "${SummarizeTranscript}",
+                              "Payload": {
+                                "channel.$": "$.channel.name",
+                                "transcript.$": "$.messages.transcript"
+                              }
+                            },
+                            "Retry": [
+                              {
+                                "ErrorEquals": [
+                                  "States.ALL"
+                                ],
+                                "IntervalSeconds": 5,
+                                "MaxAttempts": 3,
+                                "BackoffRate": 2
+                              }
+                            ],
+                            "End": true
+                          }
+                        }
+                      },
+                      {
+                        "StartAt": "Save Channel Metadata",
+                        "States": {
+                          "Save Channel Metadata": {
+                            "Type": "Task",
+                            "Resource": "${DynamoDbPutItem}",
+                            "Parameters": {
+                              "TableName": "${TableName}",
+                              "Item": {
+                                "pk": {
+                                  "S.$": "$.channel.name"
+                                },
+                                "sk": {
+                                  "S.$": "$$.Execution.StartTime"
+                                },
+                                "messageCount": {
+                                  "N.$": "States.Format('{}', $.messages.metadata.messageCount)"
+                                },
+                                "distinctUsers": {
+                                  "N.$": "States.Format('{}', $.messages.metadata.distinctUsers)"
+                                }
+                              }
+                            },
+                            "ResultPath": null,
+                            "End": true
+                          }
                         }
                       }
+                    ],
+                    "End": true,
+                    "ResultSelector": {
+                      "channel.$": "$[0]"
                     },
-                    "ResultPath": null,
-                    "End": true
+                    "OutputPath": "$.channel"
                   }
                 }
               }
-            ],
-            "End": true,
-            "ResultSelector": {
-              "channel.$": "$[0]"
+            }
+          }
+        },
+        {
+          "StartAt": "Get Member Data",
+          "States": {
+            "Get Member Data": {
+              "Type": "Task",
+              "Resource": "${LambdaInvoke}",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": "${GetMemberData}",
+                "Payload": {
+                  "filterDate.$": "$.enrichments[1].filterDate",
+                  "lastMemberCount.$": "$.enrichments[1].lastMemberCount"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Update Member Details"
             },
-            "OutputPath": "$.channel"
+            "Update Member Details": {
+              "Type": "Task",
+              "Resource": "${DynamoDbUpdateItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Key": {
+                  "pk": {
+                    "S": "lastRun"
+                  },
+                  "sk": {
+                    "S": "details"
+                  }
+                },
+                "UpdateExpression": "SET #memberCount = :memberCount, #lostMemberCount = :lostMemberCount, #newMemberCount = :newMemberCount",
+                "ExpressionAttributeNames": {
+                  "#memberCount": "memberCount",
+                  "#lostMemberCount": "lostMemberCount",
+                  "#newMemberCount": "newMemberCount"
+                },
+                "ExpressionAttributeValues": {
+                  ":memberCount": {
+                    "N.$": "States.Format('{}', $.memberCount)"
+                  },
+                  ":lostMemberCount": {
+                    "N.$": "States.Format('{}', $.lostMemberCount)"
+                  },
+                  ":newMemberCount": {
+                    "N.$": "States.Format('{}', $.newMemberCount)"
+                  }
+                }
+              },
+              "End": true,
+              "ResultPath": null
+            }
           }
         }
-      },
-      "Next": "Format Email",
-      "ItemsPath": "$.enrichments[0].channels",
-      "ItemSelector": {
-        "channel.$": "$$.Map.Item.Value",
-        "filterDate.$": "$.enrichments[1].filterDate"
+      ],
+      "ResultSelector": {
+        "channels.$": "$[0]",
+        "members.$": "$[1]"
       }
     },
     "Format Email": {
@@ -222,7 +301,8 @@
       "Parameters": {
         "FunctionName": "${FormatSummaryEmail}",
         "Payload": {
-          "channels.$": "$"
+          "channels.$": "$.channels",
+          "members.$": "$.members"
         }
       },
       "Retry": [
@@ -261,17 +341,23 @@
     },
     "Update Last Run Record": {
       "Type": "Task",
-      "Resource": "${DynamoDbPutItem}",
+      "Resource": "${DynamoDbUpdateItem}",
       "Parameters": {
         "TableName": "${TableName}",
-        "Item": {
+        "Key": {
           "pk": {
             "S": "lastRun"
           },
           "sk": {
-            "S": "date"
-          },
-          "date": {
+            "S": "details"
+          }
+        },
+        "UpdateExpression": "SET #date = :date",
+        "ExpressionAttributeNames": {
+          "#date": "date"
+        },
+        "ExpressionAttributeValues": {
+          ":date": {
             "S.$": "$$.Execution.StartTime"
           }
         }

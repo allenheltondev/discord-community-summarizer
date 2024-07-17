@@ -59,6 +59,28 @@ Resources:
         Variables:
           SECRET_ID: !Ref DiscordSecret
 
+  GetMemberDataFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - get-member-data.mjs
+    Properties:
+      Handler: get-member-data.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DiscordSecret
+      Environment:
+        Variables:
+          SECRET_ID: !Ref DiscordSecret
+          GUILD_ID: !Ref GuildId
+
   MapChannelNamesFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -145,8 +167,10 @@ Resources:
         GetChannelMessages: !GetAtt GetChannelMessagesFunction.Arn
         SummarizeTranscript: !GetAtt SummarizeTranscriptFunction.Arn
         FormatSummaryEmail: !GetAtt FormatSummaryEmailFunction.Arn
+        GetMemberData: !GetAtt GetMemberDataFunction.Arn
         DynamoDbGetItem: !Sub arn:${AWS::Partition}:states:::dynamodb:getItem
         DynamoDbPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
+        DynamoDbUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
         TableName: !Ref DiscordTable
         EventBridgePutEvents: !Sub arn:${AWS::Partition}:states:::events:putEvents
       Policies:
@@ -159,10 +183,12 @@ Resources:
                 - !GetAtt GetChannelMessagesFunction.Arn
                 - !GetAtt SummarizeTranscriptFunction.Arn
                 - !GetAtt FormatSummaryEmailFunction.Arn
+                - !GetAtt GetMemberDataFunction.Arn
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Resource: !GetAtt DiscordTable.Arn
             - Effect: Allow
               Action: events:PutEvents

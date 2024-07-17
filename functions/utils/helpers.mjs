@@ -5,7 +5,7 @@ import { getSecret } from '@aws-lambda-powertools/parameters/secrets';
 let cacheClient;
 
 export const getDiscordClient = async () => {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers] });
   const secrets = await getSecret(process.env.SECRET_ID, { transform: 'json' });
   await client.login(secrets.discord);
 

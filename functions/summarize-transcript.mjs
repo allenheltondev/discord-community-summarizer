@@ -7,7 +7,7 @@ export const handler = async (state) => {
     const prompt = `Below is a transcript of all the messages from the "${state.channel}" channel on my discord server. Create a <summary> section ` +
     `of high value and noteworthy insights and helpful answers in the discussion. Summarize it for podcast/newsletter consumption. Only list in markdown` +
     `bullet points, you don't need an intro to your answer. If nothing noteworthy occurred, just say "nothing noteworthy". In `+
-    `a <unansweredQuestions> section, state the unanswered questions and who asked them. A question should be formatted with (username) - (question). ` +
+    `a <unansweredQuestions> section, state any questions that went without an answer and who asked them. A question should be formatted with (username) - (question). ` +
     `Make the question not contain any new lines. Separate each question by a new line and do not bullet them.
     <transcript>
     ${state.transcript}

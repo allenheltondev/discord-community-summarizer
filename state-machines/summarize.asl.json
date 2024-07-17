@@ -250,7 +250,40 @@
                   "BackoffRate": 2
                 }
               ],
-              "Next": "Update Member Details"
+              "Next": "Add Member Count to Analytics"
+            },
+            "Add Member Count to Analytics": {
+              "Type": "Task",
+              "Resource": "${DynamoDbUpdateItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Key": {
+                  "pk": {
+                    "S": "member"
+                  },
+                  "sk": {
+                    "S": "counts"
+                  }
+                },
+                "UpdateExpression": "SET #data = list_append(#data, :data)",
+                "ExpressionAttributeNames": {
+                  "#data": "data"
+                },
+                "ExpressionAttributeValues": {
+                  ":data": {
+                    "L": [
+                      {
+                        "M": {
+                          "count": {"N.$": "States.Format('{}', $.memberCount)"},
+                          "date": {"S.$": "$$.Execution.StartTime"}
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "Next": "Update Member Details",
+              "ResultPath": null
             },
             "Update Member Details": {
               "Type": "Task",

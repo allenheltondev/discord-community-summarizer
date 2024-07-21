@@ -197,7 +197,7 @@ Resources:
         Trigger:
           Type: Schedule
           Properties:
-            Schedule: "cron(0 2 ? * 1 *)"
+            Schedule: "cron(0 2 ? * MON *)"
             Input: >
               {
                 "channelNames": ["security", "event-driven", "compute", "data", "programming-languages", "observability", "api", "iac-tooling", "cicd", "finops"]

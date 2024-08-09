@@ -8,24 +8,28 @@ export const handler = async (state) => {
 
     const channel = await discord.channels.fetch(state.channel.id);
     let messages = [];
-    let messageId;
+    let lastMessageId = state.lastMessageId;
+    let hasMoreMessages = false;
     do {
-      const messageBatch = await getChannelMessages(channel, messageId);
+      const messageBatch = await getChannelMessages(channel, lastMessageId);
       if (messageBatch.length) {
         messages = [...messages, ...messageBatch];
-        messageId = messageBatch[messageBatch.length - 1].id;
+        lastMessageId = messageBatch[messageBatch.length - 1].id;
+        hasMoreMessages = true;
       } else {
-        messageId = null;
+        hasMoreMessages = false;
       }
-    } while (messageId);
+    } while (hasMoreMessages);
 
     const filteredMessages = messages
       .filter(m => new Date(m.timestamp) > new Date(state.filterDate))
       .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-    const output = getFormattedResponse(state.format, filteredMessages);
-    const metadata = await getAnalytics(state.channel.name, filteredMessages);
-    return { [state.format]: output, metadata };
+    const threads = await getThreads(channel, filteredMessages);
+
+    const output = getFormattedResponse(state.format, filteredMessages, threads);
+    const metadata = await getAnalytics(state.channel.name, filteredMessages, threads);
+    return { [state.format]: output, metadata, lastMessageId };
   } catch (err) {
     console.error(err);
   } finally {
@@ -46,30 +50,68 @@ const getChannelMessages = async (channel, messageId) => {
       },
       message: m.content,
       timestamp: new Date(m.createdTimestamp).toISOString(),
-      id: m.id
+      id: m.id,
+      hasThread: m.hasThread
     };
   }).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));;
 
   return formattedMessages;
 };
 
-const getFormattedResponse = (format, messages) => {
+const getThreads = async (channel, channelMessages) => {
+  const threads = [];
+  const threadMessages = channelMessages.filter(m => m.hasThread);
+  for (let index = 0; index < threadMessages.length; index++) {
+    const threadMessage = threadMessages[index];
+    const thread = await channel.threads.fetch(threadMessage.id);
+
+    let messages = [];
+    let messageId;
+    do {
+      const messageBatch = await getChannelMessages(thread, messageId);
+      if (messageBatch.length) {
+        messages = [...messages, ...messageBatch];
+        messageId = messageBatch[messageBatch.length - 1].id;
+      } else {
+        messageId = null;
+      }
+    } while (messageId);
+    threads.push({ name: `Thread ${index + 1}`, messages });
+  }
+  return threads;
+};
+
+const getFormattedResponse = (format, messages, threads) => {
   switch (format.toLowerCase()) {
     case 'transcript':
-      return messages.map(m => `${m.user.name}: ${m.message}`).join('\n');
+      let transcript = messages.map(m => `${m.user.name}: ${m.message}`).join('\n');
+      threads.map(thread => {
+        transcript += `\n\n ${thread.name}\n`;
+        transcript += thread.messages.map(m => `${m.user.name}: ${m.message}`).join('\n');
+      });
+      return transcript;
     case 'raw':
     default:
       return messages;
   }
 };
 
-const getAnalytics = async (channel, messages) => {
+const getAnalytics = async (channel, messages, threads) => {
   const cacheClient = await getMomentoClient();
   const users = [];
   for (const message of messages) {
     await cacheClient.sortedSetIncrementScore('bis', 'participants', message.user.name, 1);
     if (!users.includes(message.user.id)) {
       users.push(message.user.id);
+    }
+  }
+
+  for (const thread of threads) {
+    for (const message of thread.messages) {
+      await cacheClient.sortedSetIncrementScore('bis', 'participants', message.user.name, 1);
+      if (!users.includes(message.user.id)) {
+        users.push(message.user.id);
+      }
     }
   }
 

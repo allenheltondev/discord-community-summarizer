@@ -200,5 +200,5 @@ Resources:
             Schedule: "cron(0 2 ? * MON *)"
             Input: >
               {
-                "channelNames": ["security", "event-driven", "compute", "data", "programming-languages", "observability", "api", "iac-tooling", "cicd", "finops"]
+                "channelNames": ["security", "event-driven", "compute", "data", "programming-languages", "observability", "api", "iac-tooling", "cicd", "finops", "general", "intros"]
               }

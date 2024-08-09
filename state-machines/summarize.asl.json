@@ -104,8 +104,66 @@
                 "ProcessorConfig": {
                   "Mode": "INLINE"
                 },
-                "StartAt": "Get Channel Messages",
+                "StartAt": "Get Channel Metadata",
                 "States": {
+                  "Get Channel Metadata": {
+                    "Type": "Task",
+                    "Resource": "${DynamoDbGetItem}",
+                    "Parameters": {
+                      "TableName": "${TableName}",
+                      "Key": {
+                        "pk": {
+                          "S.$": "$.channel.name"
+                        },
+                        "sk": {
+                          "S": "channel"
+                        }
+                      }
+                    },
+                    "Next": "Has Channel Been Scanned Before?",
+                    "ResultPath": "$.data"
+                  },
+                  "Has Channel Been Scanned Before?": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.data.Item",
+                        "IsPresent": true,
+                        "Next": "Get Channel Messages With Last Message Id"
+                      }
+                    ],
+                    "Default": "Get Channel Messages"
+                  },
+                  "Get Channel Messages With Last Message Id": {
+                    "Type": "Task",
+                    "Resource": "${LambdaInvoke}",
+                    "Parameters": {
+                      "FunctionName": "${GetChannelMessages}",
+                      "Payload": {
+                        "channel.$": "$.channel",
+                        "filterDate.$": "$.filterDate",
+                        "format": "transcript",
+                        "lastMessageId.$": "$.data.Item.lastMessageId.S"
+                      }
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "Next": "Process Messages",
+                    "ResultPath": "$.messages",
+                    "ResultSelector": {
+                      "transcript.$": "$.Payload.transcript",
+                      "metadata.$": "$.Payload.metadata",
+                      "lastMessageId.$": "$.Payload.lastMessageId"
+                    }
+                  },
                   "Get Channel Messages": {
                     "Type": "Task",
                     "Resource": "${LambdaInvoke}",
@@ -131,7 +189,8 @@
                     "ResultPath": "$.messages",
                     "ResultSelector": {
                       "transcript.$": "$.Payload.transcript",
-                      "metadata.$": "$.Payload.metadata"
+                      "metadata.$": "$.Payload.metadata",
+                      "lastMessageId.$": "$.Payload.lastMessageId"
                     }
                   },
                   "Process Messages": {
@@ -187,9 +246,9 @@
                         }
                       },
                       {
-                        "StartAt": "Save Channel Metadata",
+                        "StartAt": "Save Channel Run Data",
                         "States": {
-                          "Save Channel Metadata": {
+                          "Save Channel Run Data": {
                             "Type": "Task",
                             "Resource": "${DynamoDbPutItem}",
                             "Parameters": {
@@ -206,6 +265,26 @@
                                 },
                                 "distinctUsers": {
                                   "N.$": "States.Format('{}', $.messages.metadata.distinctUsers)"
+                                }
+                              }
+                            },
+                            "ResultPath": null,
+                            "Next": "Save Channel Metadata"
+                          },
+                          "Save Channel Metadata": {
+                            "Type": "Task",
+                            "Resource": "${DynamoDbPutItem}",
+                            "Parameters": {
+                              "TableName": "${TableName}",
+                              "Item": {
+                                "pk": {
+                                  "S.$": "$.channel.name"
+                                },
+                                "sk": {
+                                  "S": "channel"
+                                },
+                                "lastMessageId": {
+                                  "S.$": "$.messages.lastMessageId"
                                 }
                               }
                             },
@@ -362,6 +441,7 @@
             "Detail": {
               "subject": "Believe in Serverless Weekly Update",
               "to": "allenheltondev@gmail.com",
+              "cc": ["andres@andmore.dev", "daheber@gmail.com", "j.eastham1993@gmail.com", "benbpyle@gmail.com"],
               "html.$": "$.html"
             },
             "DetailType": "Send Email",

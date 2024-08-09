@@ -52,7 +52,7 @@ const getTopChannels = async () => {
   let topChannels = [];
   const channels = await cacheClient.sortedSetFetchByScore('bis', 'channels', { order: 'DESC' });
   if (channels instanceof CacheSortedSetFetch.Hit) {
-    topChannels = channels.value();
+    topChannels = channels.value().filter(c => c.score > 1);
   }
 
   return topChannels;

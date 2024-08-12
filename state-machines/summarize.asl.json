@@ -62,7 +62,24 @@
                   "Next": "Use Last Run"
                 }
               ],
-              "Default": "Use Execution Date"
+              "Default": "Create Last Run Record"
+            },
+            "Create Last Run Record": {
+              "Type": "Task",
+              "Resource": "${DynamoDbPutItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Item": {
+                  "pk": {
+                    "S": "lastRun"
+                  },
+                  "sk": {
+                    "S": "details"
+                  }
+                }
+              },
+              "Next": "Use Execution Date",
+              "ResultPath": null
             },
             "Use Last Run": {
               "Type": "Pass",
@@ -355,6 +372,44 @@
                         "M": {
                           "count": {"N.$": "States.Format('{}', $.memberCount)"},
                           "date": {"S.$": "$$.Execution.StartTime"}
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "Next": "Update Member Details",
+              "ResultPath": null,
+              "Catch": [
+                {
+                  "ErrorEquals": ["DynamoDB.AmazonDynamoDBException"],
+                  "Next": "Create Member Count Analytics",
+                  "ResultPath": null
+                }
+              ]
+            },
+            "Create Member Count Analytics": {
+              "Type": "Task",
+              "Resource": "${DynamoDbPutItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Item": {
+                  "pk": {
+                    "S": "member"
+                  },
+                  "sk": {
+                    "S": "counts"
+                  },
+                  "data": {
+                    "L": [
+                      {
+                        "M": {
+                          "count": {
+                            "N.$": "States.Format('{}', $.memberCount)"
+                          },
+                          "date": {
+                            "S.$": "$$.Execution.StartTime"
+                          }
                         }
                       }
                     ]

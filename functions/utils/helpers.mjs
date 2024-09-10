@@ -34,7 +34,7 @@ export const getMomentoToken = async (permissions) => {
     });
   }
 
-  const token = await authClient.generateDisposableToken(permissions, ExpiresIn.minutes(30));
+  const token = await authClient.generateDisposableToken({ permissions }, ExpiresIn.minutes(30));
   if (token instanceof GenerateDisposableToken.Success) {
     return token.authToken;
   }

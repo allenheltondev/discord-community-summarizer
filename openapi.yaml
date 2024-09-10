@@ -26,6 +26,51 @@ paths:
                 type: string
         500:
           $ref: '#/components/responses/InternalServerError'
+    post:
+      summary: Start a new summary async task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                fromDate:
+                  type: string
+                  format: date-time
+                cc:
+                  type: array
+                  items:
+                    type: string
+                    format: email
+              required:
+                - email
+                - fromDate
+      responses:
+        202:
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                required:
+                  - id
+        400:
+          $ref: '#/components/responses/ClientError'
+        403:
+          $ref: '#/components/responses/Forbidden'
+        409:
+          $ref: '#/components/responses/Conflict'
+        500:
+          $ref: '#/components/responses/InternalServerError'
+
+
   /summaries/{summaryId}:
     get:
       summary: Returns an HTML page with the summary details

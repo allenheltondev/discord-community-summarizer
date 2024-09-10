@@ -1,5 +1,5 @@
 {
-  "Comment": "A description of my state machine",
+  "Comment": "Create community summary",
   "StartAt": "Run Enrichments",
   "States": {
     "Run Enrichments": {
@@ -520,11 +520,25 @@
               "ResultPath": null
             }
           }
+        },
+        {
+          "StartAt": "Format metadata",
+          "States": {
+            "Format metadata": {
+              "Type": "Pass",
+              "End": true,
+              "Parameters": {
+                "fromDate.$": "$.enrichments[1].filterDate",
+                "toDate.$": "$$.Execution.StartTime"
+              }
+            }
+          }
         }
       ],
       "ResultSelector": {
         "channels.$": "$[0]",
-        "members.$": "$[1]"
+        "members.$": "$[1]",
+        "metadata.$": "$[2]"
       }
     },
     "Format Email": {
@@ -535,7 +549,8 @@
         "FunctionName": "${FormatSummaryEmail}",
         "Payload": {
           "channels.$": "$.channels",
-          "members.$": "$.members"
+          "members.$": "$.members",
+          "metadata.$": "$.metadata"
         }
       },
       "Retry": [
@@ -675,7 +690,7 @@
                     "S": "run"
                   },
                   "sk": {
-                    "S.$": "States.ArrayGetItem(States.StringSplit($$.Execution.Id, ':'), States.MathAdd(-1, States.ArrayLength(States.StringSplit($$.Execution.Id, ':'))))"
+                    "S.$": "$$.Execution.Name"
                   },
                   "runDate": {
                     "S.$": "$$.Execution.StartTime"

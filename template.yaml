@@ -131,6 +131,34 @@ Resources:
             Path: /summaries/{summaryId}
             Method: GET
 
+  StartSummaryTaskFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - start-summary-task.mjs
+    Properties:
+      Handler: start-summary-task.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref SummarizeStateMachine
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref SummarizeStateMachine
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommunityApi
+            Path: /summaries
+            Method: POST
+
   GetMemberDataFunction:
     Type: AWS::Serverless::Function
     Metadata:

@@ -1,12 +1,12 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 const bedrock = new BedrockRuntimeClient();
-//const MODEL_ID = 'anthropic.claude-3-5-sonnet-20240620-v1:0';
-const MODEL_ID = 'anthropic.claude-3-sonnet-20240229-v1:0';
+const MODEL_ID = 'anthropic.claude-3-5-sonnet-20240620-v1:0';
+//const MODEL_ID = 'anthropic.claude-3-sonnet-20240229-v1:0';
 
 export const handler = async (state) => {
   try{
     const prompt = `Below is a transcript of all the messages from the "${state.channel}" channel on my discord server. Threads from within the conversation are ` +
-    `appended to the bottom with the format "Thread <count>". Create a <summary> section of high value and noteworthy insights, conversations, and helpful answers ` +
+    `appended to the bottom with the format "Thread {count}". Create a <summary> section of high value and noteworthy insights, conversations, and helpful answers ` +
     `in the discussion. Summarize it for newsletter consumption. Treat each thread as a separate conversation with its own distinct summary points. Only list in ` +
     `markdown bullet points, you don't need an intro to your answer. If nothing noteworthy occurred, just say "nothing noteworthy". In a <unansweredQuestions>` +
     `section, state any relevant tech questions that went without an answer and who asked them. A question should be formatted with (username) - (question). ` +

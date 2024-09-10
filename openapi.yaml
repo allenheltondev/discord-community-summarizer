@@ -1,0 +1,116 @@
+openapi: 3.0.0
+info:
+  title: Community Summary API
+  description: Summarizes Discord Community activity
+  version: 1.0.0
+
+x-amazon-apigateway-cors:
+  allowOrigins:
+    - '*'
+  allowMethods:
+    - POST
+  allowHeaders:
+    - content-type
+  maxAge: 3600
+
+paths:
+  /summaries:
+    get:
+      summary: Returns an HTML page with a list of community summaries
+      responses:
+        200:
+          description: OK
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          $ref: '#/components/responses/InternalServerError'
+  /summaries/{summaryId}:
+    get:
+      summary: Returns an HTML page with the summary details
+      responses:
+        200:
+          description: OK
+          content:
+            text/html:
+              schema:
+                type: string
+        404:
+          $ref: '#/components/responses/NotFound'
+        500:
+          $ref: '#/components/responses/InternalServerError'
+
+
+components:
+  parameters:
+    summaryId:
+      name: summaryId
+      in: path
+      description: Identifier for an summary
+      required: true
+      example: 09sl3415098gplmn
+      schema:
+        type: string
+
+  responses:
+    ClientError: #400
+      description: The request was in an invalid format
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Could not perform operation with provided data
+            required:
+              - message
+    Forbidden: #403
+      description: The caller is not authorized to perform this operation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Forbidden
+            required:
+              - message
+    NotFound: #404
+      description: The requested item was not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Could not find an account with the specified id.
+            required:
+              - message
+    Conflict: #409
+      description: The requested item was not in the proper state
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: The provided platform is not configured
+            required:
+              - message
+    InternalServerError: #500
+      description: The server encountered an unexpected condition which prevented it from fulfilling the request.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: An error occurred saving the item.
+            required:
+              - message

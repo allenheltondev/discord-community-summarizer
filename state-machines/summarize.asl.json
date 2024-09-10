@@ -1,5 +1,5 @@
 {
-  "Comment": "A description of my state machine",
+  "Comment": "Create community summary",
   "StartAt": "Run Enrichments",
   "States": {
     "Run Enrichments": {
@@ -83,11 +83,42 @@
             },
             "Use Last Run": {
               "Type": "Pass",
-              "End": true,
+              "Next": "Has On-Demand Settings?",
               "Parameters": {
                 "filterDate.$": "$.Item.date.S",
                 "lastMemberCount.$": "$.Item.memberCount.N"
               }
+            },
+            "Has On-Demand Settings?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$$.Execution.Input.mode",
+                      "StringEquals": "on demand"
+                    },
+                    {
+                      "Variable": "$$.Execution.Input.metadata.fromDate",
+                      "IsPresent": true
+                    }
+                  ],
+                  "Next": "Use On-Demand Settings"
+                }
+              ],
+              "Default": "Use Schedule Settings"
+            },
+            "Use Schedule Settings": {
+              "Type": "Pass",
+              "End": true
+            },
+            "Use On-Demand Settings": {
+              "Type": "Pass",
+              "Parameters": {
+                "filterDate.$": "$$.Execution.Input.metadata.fromDate",
+                "lastMemberCount.$": "$.lastMemberCount"
+              },
+              "End": true
             },
             "Use Execution Date": {
               "Type": "Pass",
@@ -137,12 +168,17 @@
                         }
                       }
                     },
-                    "Next": "Has Channel Been Scanned Before?",
+                    "Next": "Is On-Demand Or Has Channel Been Scanned Before?",
                     "ResultPath": "$.data"
                   },
-                  "Has Channel Been Scanned Before?": {
+                  "Is On-Demand Or Has Channel Been Scanned Before?": {
                     "Type": "Choice",
                     "Choices": [
+                      {
+                        "Variable": "$$.Execution.Input.mode",
+                        "StringEquals": "on demand",
+                        "Next": "Get Channel Messages"
+                      },
                       {
                         "Variable": "$.data.Item",
                         "IsPresent": true,
@@ -263,8 +299,23 @@
                         }
                       },
                       {
-                        "StartAt": "Save Channel Run Data",
+                        "StartAt": "Save Channel Data?",
                         "States": {
+                          "Save Channel Data?": {
+                            "Type": "Choice",
+                            "Choices": [
+                              {
+                                "Variable": "$$.Execution.Input.mode",
+                                "StringEquals": "on demand",
+                                "Next": "Skip Channel Data Save"
+                              }
+                            ],
+                            "Default": "Save Channel Run Data"
+                          },
+                          "Skip Channel Data Save": {
+                            "Type": "Pass",
+                            "End": true
+                          },
                           "Save Channel Run Data": {
                             "Type": "Task",
                             "Resource": "${DynamoDbPutItem}",
@@ -346,7 +397,22 @@
                   "BackoffRate": 2
                 }
               ],
-              "Next": "Add Member Count to Analytics"
+              "Next": "Update Member Counts?"
+            },
+            "Update Member Counts?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$$.Execution.Input.mode",
+                  "StringEquals": "schedule",
+                  "Next": "Add Member Count to Analytics"
+                }
+              ],
+              "Default": "Skip Member Update"
+            },
+            "Skip Member Update": {
+              "Type": "Pass",
+              "End": true
             },
             "Add Member Count to Analytics": {
               "Type": "Task",
@@ -454,11 +520,25 @@
               "ResultPath": null
             }
           }
+        },
+        {
+          "StartAt": "Format metadata",
+          "States": {
+            "Format metadata": {
+              "Type": "Pass",
+              "End": true,
+              "Parameters": {
+                "fromDate.$": "$.enrichments[1].filterDate",
+                "toDate.$": "$$.Execution.StartTime"
+              }
+            }
+          }
         }
       ],
       "ResultSelector": {
         "channels.$": "$[0]",
-        "members.$": "$[1]"
+        "members.$": "$[1]",
+        "metadata.$": "$[2]"
       }
     },
     "Format Email": {
@@ -469,7 +549,8 @@
         "FunctionName": "${FormatSummaryEmail}",
         "Payload": {
           "channels.$": "$.channels",
-          "members.$": "$.members"
+          "members.$": "$.members",
+          "metadata.$": "$.metadata"
         }
       },
       "Retry": [
@@ -485,53 +566,149 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "Send Email"
+      "Next": "Save Run Results"
     },
-    "Send Email": {
-      "Type": "Task",
-      "Resource": "${EventBridgePutEvents}",
-      "Parameters": {
-        "Entries": [
-          {
-            "Detail": {
-              "subject": "Believe in Serverless Weekly Update",
-              "to": "allenheltondev@gmail.com",
-              "cc": ["andres@andmore.dev", "daheber@gmail.com", "j.eastham1993@gmail.com", "benbpyle@gmail.com"],
-              "html.$": "$.html"
+    "Save Run Results": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Email Default Recipients?",
+          "States": {
+            "Email Default Recipients?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$$.Execution.Input.metadata.to",
+                  "IsPresent": true,
+                  "Next": "Send Email To Custom Recipients"
+                }
+              ],
+              "Default": "Send Email (Default)"
             },
-            "DetailType": "Send Email",
-            "Source": "bis.weekly-update"
-          }
-        ]
-      },
-      "Next": "Update Last Run Record",
-      "ResultPath": null
-    },
-    "Update Last Run Record": {
-      "Type": "Task",
-      "Resource": "${DynamoDbUpdateItem}",
-      "Parameters": {
-        "TableName": "${TableName}",
-        "Key": {
-          "pk": {
-            "S": "lastRun"
-          },
-          "sk": {
-            "S": "details"
+            "Send Email To Custom Recipients": {
+              "Type": "Task",
+              "Resource": "${EventBridgePutEvents}",
+              "Parameters": {
+                "Entries": [
+                  {
+                    "Detail": {
+                      "subject": "[On-Demand] Believe in Serverless Weekly Update",
+                      "to.$": "$$.Execution.Input.metadata.to",
+                      "cc.$": "$$.Execution.Input.metadata.cc",
+                      "html.$": "$.html"
+                    },
+                    "DetailType": "Send Email",
+                    "Source": "bis.weekly-update"
+                  }
+                ]
+              },
+              "ResultPath": null,
+              "End": true
+            },
+            "Send Email (Default)": {
+              "Type": "Task",
+              "Resource": "${EventBridgePutEvents}",
+              "Parameters": {
+                "Entries": [
+                  {
+                    "Detail": {
+                      "subject": "Believe in Serverless Weekly Update",
+                      "to": "allenheltondev@gmail.com",
+                      "cc": [
+                        "andres@andmore.dev",
+                        "daheber@gmail.com",
+                        "j.eastham1993@gmail.com",
+                        "benbpyle@gmail.com"
+                      ],
+                      "html.$": "$.html"
+                    },
+                    "DetailType": "Send Email",
+                    "Source": "bis.weekly-update"
+                  }
+                ]
+              },
+              "ResultPath": null,
+              "End": true
+            }
           }
         },
-        "UpdateExpression": "SET #date = :date",
-        "ExpressionAttributeNames": {
-          "#date": "date"
+        {
+          "StartAt": "Save Last Run Record?",
+          "States": {
+            "Save Last Run Record?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$$.Execution.Input.mode",
+                  "StringEquals": "on demand",
+                  "Next": "Success"
+                }
+              ],
+              "Default": "Update Last Run Record"
+            },
+            "Success": {
+              "Type": "Succeed"
+            },
+            "Update Last Run Record": {
+              "Type": "Task",
+              "Resource": "${DynamoDbUpdateItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Key": {
+                  "pk": {
+                    "S": "lastRun"
+                  },
+                  "sk": {
+                    "S": "details"
+                  }
+                },
+                "UpdateExpression": "SET #date = :date",
+                "ExpressionAttributeNames": {
+                  "#date": "date"
+                },
+                "ExpressionAttributeValues": {
+                  ":date": {
+                    "S.$": "$$.Execution.StartTime"
+                  }
+                }
+              },
+              "End": true,
+              "ResultPath": null
+            }
+          }
         },
-        "ExpressionAttributeValues": {
-          ":date": {
-            "S.$": "$$.Execution.StartTime"
+        {
+          "StartAt": "Save Run Output",
+          "States": {
+            "Save Run Output": {
+              "Type": "Task",
+              "Resource": "${DynamoDbPutItem}",
+              "Parameters": {
+                "TableName": "${TableName}",
+                "Item": {
+                  "pk": {
+                    "S": "run"
+                  },
+                  "sk": {
+                    "S.$": "$$.Execution.Name"
+                  },
+                  "runDate": {
+                    "S.$": "$$.Execution.StartTime"
+                  },
+                  "mode": {
+                    "S.$": "$$.Execution.Input.mode"
+                  },
+                  "html": {
+                    "S.$": "$.html"
+                  }
+                }
+              },
+              "End": true
+            }
           }
         }
-      },
-      "End": true,
-      "ResultPath": null
+      ],
+      "End": true
     }
   }
 }

@@ -38,6 +38,16 @@ Globals:
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
 
 Resources:
+  CommunityApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: v1
+      DefinitionBody:
+        'Fn::Transform':
+          Name: AWS::Include
+          Parameters:
+            Location: ./openapi.yaml
+
   GetChannelMessagesFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -58,6 +68,96 @@ Resources:
       Environment:
         Variables:
           SECRET_ID: !Ref DiscordSecret
+
+  GetSummaryListPageFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - get-summary-list-page.mjs
+    Properties:
+      Handler: get-summary-list-page.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DiscordSecret
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource: !GetAtt DiscordTable.Arn
+      Environment:
+        Variables:
+          SECRET_ID: !Ref DiscordSecret
+          TABLE_NAME: !Ref DiscordTable
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommunityApi
+            Path: /summaries
+            Method: GET
+
+  GetSummaryPageFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - get-summary-page.mjs
+    Properties:
+      Handler: get-summary-page.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt DiscordTable.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DiscordTable
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommunityApi
+            Path: /summaries/{summaryId}
+            Method: GET
+
+  StartSummaryTaskFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - start-summary-task.mjs
+    Properties:
+      Handler: start-summary-task.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref SummarizeStateMachine
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref SummarizeStateMachine
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommunityApi
+            Path: /summaries
+            Method: POST
 
   GetMemberDataFunction:
     Type: AWS::Serverless::Function
@@ -200,5 +300,11 @@ Resources:
             Schedule: "cron(0 2 ? * MON *)"
             Input: >
               {
-                "channelNames": ["security", "event-driven", "compute", "data", "programming-languages", "observability", "api", "iac-tooling", "cicd", "finops", "general", "intros"]
+                "channelNames": ["security", "event-driven", "compute", "data", "programming-languages", "observability", "api", "iac-tooling", "cicd", "finops", "general", "intros"],
+                "mode": "schedule"
               }
+
+Outputs:
+  ApiBaseUrl:
+    Description: API Gateway endpoint for the community API
+    Value: !Sub 'https://${CommunityApi}.execute-api.${AWS::Region}.amazonaws.com/v1'

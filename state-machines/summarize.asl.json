@@ -703,6 +703,24 @@
                   }
                 }
               },
+              "Next": "Publish Summary Completed Event"
+            },
+            "Publish Summary Completed Event": {
+              "Type": "Task",
+              "Resource": "${EventBridgePutEvents}",
+              "Parameters": {
+                "Entries": [
+                  {
+                    "Detail": {
+                      "cacheName": "bis",
+                      "topicName": "summaries",
+                      "message.$": "$$.Execution.Name"
+                    },
+                    "DetailType": "topicPublish",
+                    "Source": "SummarizeStateMachine"
+                  }
+                ]
+              },
               "End": true
             }
           }

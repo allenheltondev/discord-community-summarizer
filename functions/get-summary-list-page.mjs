@@ -1,5 +1,6 @@
 import { DynamoDBClient, QueryCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { getMomentoToken } from './utils/helpers.mjs';
 
 const ddb = new DynamoDBClient();
 
@@ -20,7 +21,7 @@ export const handler = async (event) => {
       defaultDate = `${pieces[0]}:${pieces[1]}`;
     }
 
-    const summaryPage = buildSummaryPage(defaultDate, summaries);
+    const summaryPage = await buildSummaryPage(defaultDate, summaries);
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'text/html' },
@@ -56,7 +57,8 @@ const getSummaries = async () => {
   return summaries;
 };
 
-export function buildSummaryPage(defaultDate, summaries) {
+const buildSummaryPage = async (defaultDate, summaries) => {
+  const momentoToken = await getMomentoToken([{ role: 'subscribeonly', cache: 'bis', topic: 'summaries' }]);
   const summaryRows = summaries.map(summary => `
     <tr>
       <td class="capitalize text-black pt-2"><a href="/v1/summaries/${summary.id}" class="hover:text-blue-600">${summary.title}</a></td>
@@ -164,13 +166,35 @@ export function buildSummaryPage(defaultDate, summaries) {
                   })
                 })
                 .then(data => {
-                  alert('Got it. Watch for an email.');
+                  subscribeForUpdates();
                 })
                 .catch((error) => {
                   console.error('Error:', error);
                   alert('Error starting task');
                 });
                 modal.style.display = "none";
+            }
+
+            async function subscribeForUpdates() {
+              fetch('https://api.cache.cell-us-east-1-1.prod.a.momentohq.com/topics/bis/summaries', {
+                method: 'GET',
+                headers: {
+                  'Authorization': '${momentoToken}',
+                  'Connection': 'keep-alive'
+                }
+              })
+              .then(response => {
+                if (!response.ok) {
+                  throw new Error('Network response was not ok');
+                }
+                return response.json();
+              })
+              .then(data => {
+                window.location.reload();
+              })
+              .catch(error => {
+                console.error('There was a problem subscribing for updates:', error);
+              });
             }
         });
     </script>
